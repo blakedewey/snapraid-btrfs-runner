@@ -69,7 +69,7 @@ class SnapraidRunner:
             config.getboolean('snapraid-btrfs', 'cleanup', fallback=False)
         self.snapraid_btrfs_pool = pool if pool is not None else \
             config.getboolean('snapraid-btrfs', 'pool', fallback=False)
-        self.snapraid_btrfs_pool_dir = config.getboolean('snapraid-btrfs', 'pool-dir', fallback=False)
+        self.snapraid_btrfs_pool_dir = config.getstring('snapraid-btrfs', 'pool-dir', fallback=False)
 
         # Snapper Options
         self.snapper_exe = config.getstring('snapper', 'executable')
