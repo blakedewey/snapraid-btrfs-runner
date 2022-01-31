@@ -108,14 +108,7 @@ class SnapraidRunner:
         self.email_sendon = config.getstring('email', 'sendon', fallback=None)
         if self.email_sendon is not None:
             self.email_sendon = self.email_sendon.split(',')
-
-        # SMTP Options
-        self.smtp_ssl = config.getboolean('smtp', 'ssl', fallback=False)
-        self.smtp_tls = config.getboolean('smtp', 'tls', fallback=False)
-        self.smtp_host = config.getstring('smtp', 'host', fallback=None)
-        self.smtp_port = config.getstring('smtp', 'port', fallback=None)
-        self.smtp_user = config.getstring('smtp', 'user', fallback=None)
-        self.smtp_password = config.getstring('smtp', 'password', fallback=None)
+        self.oauth2_file = config.getstring('email', 'oauth2_file', fallback=None)
 
         # Global Variables
         self.email_stream = None
@@ -198,17 +191,22 @@ class SnapraidRunner:
             logger.addHandler(email_logger)
 
     def send_email(self, success):
-        import smtplib
-        from email.mime.text import MIMEText
-        from email import charset
+        try:
+            from yagmail import SMTP
+        except ImportError:
+            logging.error('yagmail is required to send email using gmail-oauth.')
+            return
 
-        for varname in ['smtp_host', 'email_subject', 'email_to', 'email_from']:
+        for varname in ['oauth2_file', 'email_subject', 'email_to', 'email_from']:
             if getattr(self, varname) is None:
                 logging.error('Failed to send email because option "%s" is not set' % varname)
                 return
 
+        if not os.path.exists(self.oauth2_file):
+            logging.error('Failed to send email because OAuth2 file does not exist.')
+            return
+
         # use quoted-printable instead of the default base64
-        charset.add_charset('utf-8', charset.SHORTEST, charset.QP)
         if success:
             body = 'SnapRAID job completed successfully:\n\n\n'
         else:
@@ -226,23 +224,9 @@ class SnapraidRunner:
             )
         body += log
 
-        msg = MIMEText(body, 'plain', 'utf-8')
-        msg['Subject'] = self.email_subject + (' SUCCESS' if success else ' ERROR')
-        msg['From'] = self.email_from
-        msg['To'] = self.email_to
-        smtp = {'host': self.smtp_host}
-        if self.smtp_port is not None:
-            smtp['port'] = self.smtp_port
-        if self.smtp_ssl:
-            server = smtplib.SMTP_SSL(**smtp)
-        else:
-            server = smtplib.SMTP(**smtp)
-            if self.smtp_tls:
-                server.starttls()
-        if self.smtp_user:
-            server.login(self.smtp_user, '' if self.smtp_password is None else self.smtp_password)
-        server.sendmail(self.email_from, [self.email_to], msg.as_string())
-        server.quit()
+        subject = self.email_subject + (' SUCCESS' if success else ' ERROR')
+        smtp = SMTP(self.email_from, oauth2_file=self.oauth2_file)
+        smtp.send(to=self.email_to, subject=subject, contents=body)
 
     def run(self):
         logging.info('=' * 60)
@@ -348,6 +332,10 @@ class SnapraidRunner:
             logging.error('Run failed')
         sys.exit(0 if is_success else 1)
 
+    def create_oauth2_file(self):
+        from yagmail import SMTP
+        SMTP(self.email_from, oauth2_file=self.oauth2_file)
+
 
 def main():
     parser = ArgumentParser()
@@ -367,6 +355,8 @@ def main():
                         help='Do not scrub (overrides config)')
     parser.add_argument('--ignore-deletethreshold', action='store_true', default=False,
                         help='Sync even if configured delete threshold is exceeded')
+    parser.add_argument('--create-oauth2-file', action='store_true', default=False,
+                        help='create a credentials files for OAuth2')
     parser.add_argument('--dry-run', action='store_true', default=False,
                         help='Display commands but do not run them')
     args = parser.parse_args()
@@ -376,6 +366,10 @@ def main():
     except Exception as e:
         raise Exception('Unexpected exception while loading config.')\
             .with_traceback(e.__traceback__)
+
+    if args.create_oauth2_file:
+        runner.create_oauth2_file()
+        sys.exit(0)
 
     try:
         runner.create_logger()
